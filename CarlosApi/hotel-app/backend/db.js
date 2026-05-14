@@ -5,21 +5,14 @@ const db = mysql.createPool({
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306,
+  port: process.env.DB_PORT,
   ssl: {
-    rejectUnauthorized: false
-  },
-  waitForConnections: true,
-  connectionLimit: 10,
-  queueLimit: 0,
-  enableKeepAlive: true,
-  keepAliveInitialDelay: 0
+    rejectUnauthorized: false  // Esto es clave para Clever Cloud
+  }
 });
 
-// Verificar conexión al arrancar
 db.getConnection((err, connection) => {
   if (err) {
-    console.log("Error DB:", err.code);
     console.log("Error DB:", err.message);
   } else {
     console.log("Conectado a MySQL - Pool listo");
