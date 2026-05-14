@@ -1,17 +1,17 @@
 const mysql = require("mysql2");
 
 console.log('=== DEBUG ENV VARS ===');
-console.log('DB_HOST:', process.env.DB_HOST);
-console.log('DB_USER:', process.env.DB_USER);
-console.log('DB_NAME:', process.env.DB_NAME);
+console.log('HOST:', process.env.MYSQL_ADDON_HOST);
+console.log('USER:', process.env.MYSQL_ADDON_USER);
+console.log('DB:', process.env.MYSQL_ADDON_DB);
 console.log('======================');
 
 const db = mysql.createConnection({
-  host: process.env.DB_HOST,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASS,
-  database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306
+  host: process.env.MYSQL_ADDON_HOST,
+  user: process.env.MYSQL_ADDON_USER,
+  password: process.env.MYSQL_ADDON_PASSWORD,
+  database: process.env.MYSQL_ADDON_DB,
+  port: process.env.MYSQL_ADDON_PORT
 });
 
 db.connect((err) => {
