@@ -6,6 +6,9 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
+// Render necesita esto para los proxies
+app.set('trust proxy', 1);
+
 app.use(cors());
 app.use(express.json());
 
@@ -26,6 +29,16 @@ db.connect((err) => {
     } else {
         console.log('Conectado a MySQL');
     }
+});
+
+// ===== RUTA RAIZ PARA HEALTH CHECK DE RENDER =====
+// Esta ruta DEBE responder rápido o Render te tumba
+app.get('/', (req, res) => {
+    res.status(200).json({
+        status: 'ok',
+        message: 'API Hotel funcionando',
+        timestamp: new Date().toISOString()
+    });
 });
 
 // ===== MIDDLEWARE PARA VERIFICAR TOKEN =====
@@ -94,11 +107,6 @@ app.post('/login', (req, res) => {
         const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secretkey', { expiresIn: '7d' });
         res.json({ token, user: { id: user.id, nombre: user.nombre, email: user.email } });
     });
-});
-
-// ===== RUTA RAIZ PARA HEALTH CHECK =====
-app.get('/', (req, res) => {
-    res.json({ message: 'API Hotel funcionando' });
 });
 
 // ===== DASHBOARD =====
@@ -268,7 +276,7 @@ app.delete('/reservas/:id', verificarToken, (req, res) => {
     });
 });
 
-// SERVER
+// SERVER - ESTO ES LO CRÍTICO PARA RENDER
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Servidor en puerto ${PORT}`);
