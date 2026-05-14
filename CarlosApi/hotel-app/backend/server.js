@@ -1,4 +1,3 @@
-require('dotenv').config(); // <-- IMPORTANTE: de primeras
 const express = require('express');
 const cors = require('cors');
 const { createClient } = require('@supabase/supabase-js');
@@ -7,12 +6,18 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
+// ===== DEBUG ENV - BORRAR DESPUÉS DE PROBAR =====
+console.log('=== RAILWAY ENV CHECK ===');
+console.log('SUPABASE_URL:', process.env.SUPABASE_URL? 'OK' : 'FALTA');
+console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY? 'OK' : 'FALTA');
+console.log('JWT_SECRET:', process.env.JWT_SECRET? 'OK' : 'FALTA');
+console.log('========================');
+
 app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
 
 // ===== SUPABASE CLIENT =====
-// Borra el require('./db') y quédate solo con este
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -34,7 +39,7 @@ function verificarToken(req, res, next) {
 
   if (!token) return res.status(401).json({ message: 'Token requerido' });
 
-  jwt.verify(token, process.env.JWT_SECRET || 'secretkey', (err, user) => {
+  jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) return res.status(403).json({ message: 'Token inválido' });
     req.user = user;
     next();
@@ -51,10 +56,10 @@ app.post('/register', async (req, res) => {
   }
 
   const { data: existing } = await supabase
-  .from('usuarios')
-  .select('id')
-  .eq('email', email)
-  .maybeSingle(); // maybeSingle para que no tire error si no existe
+   .from('usuarios')
+   .select('id')
+   .eq('email', email)
+   .maybeSingle();
 
   if (existing) {
     return res.status(400).json({ message: 'Usuario ya existe' });
@@ -62,8 +67,8 @@ app.post('/register', async (req, res) => {
 
   const hash = await bcrypt.hash(password, 10);
   const { error } = await supabase
-  .from('usuarios')
-  .insert([{ nombre, email, password: hash }]);
+   .from('usuarios')
+   .insert([{ nombre, email, password: hash }]);
 
   if (error) return res.status(500).json({ message: error.message });
   res.status(201).json({ message: 'Usuario creado' });
@@ -78,10 +83,10 @@ app.post('/login', async (req, res) => {
   }
 
   const { data: user, error } = await supabase
-  .from('usuarios')
-  .select('*')
-  .eq('email', email)
-  .single();
+   .from('usuarios')
+   .select('*')
+   .eq('email', email)
+   .single();
 
   if (error ||!user) {
     return res.status(401).json({ message: 'No existe usuario' });
@@ -92,7 +97,7 @@ app.post('/login', async (req, res) => {
     return res.status(401).json({ message: 'Password incorrecta' });
   }
 
-  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secretkey', { expiresIn: '7d' });
+  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: '7d' });
   res.json({ token, user: { id: user.id, nombre: user.nombre, email: user.email } });
 });
 
@@ -114,9 +119,9 @@ app.get('/dashboard', verificarToken, async (req, res) => {
 // ===== CLIENTES CRUD =====
 app.get('/clientes', verificarToken, async (req, res) => {
   const { data, error } = await supabase
-  .from('clientes')
-  .select('*')
-  .order('id', { ascending: false });
+   .from('clientes')
+   .select('*')
+   .order('id', { ascending: false });
 
   if (error) return res.status(500).json({ message: error.message });
   res.json(data);
@@ -130,10 +135,10 @@ app.post('/clientes', verificarToken, async (req, res) => {
   }
 
   const { data, error } = await supabase
-  .from('clientes')
-  .insert([{ nombre, email, telefono }])
-  .select()
-  .single();
+   .from('clientes')
+   .insert([{ nombre, email, telefono }])
+   .select()
+   .single();
 
   if (error) return res.status(500).json({ message: error.message });
   res.status(201).json({ message: 'Cliente creado', id: data.id });
@@ -144,9 +149,9 @@ app.put('/clientes/:id', verificarToken, async (req, res) => {
   const { nombre, email, telefono } = req.body;
 
   const { error } = await supabase
-  .from('clientes')
-  .update({ nombre, email, telefono })
-  .eq('id', id);
+   .from('clientes')
+   .update({ nombre, email, telefono })
+   .eq('id', id);
 
   if (error) return res.status(500).json({ message: error.message });
   res.json({ message: 'Cliente actualizado' });
@@ -154,9 +159,9 @@ app.put('/clientes/:id', verificarToken, async (req, res) => {
 
 app.delete('/clientes/:id', verificarToken, async (req, res) => {
   const { error } = await supabase
-  .from('clientes')
-  .delete()
-  .eq('id', req.params.id);
+   .from('clientes')
+   .delete()
+   .eq('id', req.params.id);
 
   if (error) return res.status(500).json({ message: error.message });
   res.json({ message: 'Cliente eliminado' });
@@ -165,9 +170,9 @@ app.delete('/clientes/:id', verificarToken, async (req, res) => {
 // ===== HABITACIONES CRUD =====
 app.get('/habitaciones', verificarToken, async (req, res) => {
   const { data, error } = await supabase
-  .from('habitaciones')
-  .select('*')
-  .order('numero', { ascending: true });
+   .from('habitaciones')
+   .select('*')
+   .order('numero', { ascending: true });
 
   if (error) return res.status(500).json({ message: error.message });
   res.json(data);
@@ -181,10 +186,10 @@ app.post('/habitaciones', verificarToken, async (req, res) => {
   }
 
   const { data, error } = await supabase
-  .from('habitaciones')
-  .insert([{ numero, tipo, precio, estado: estado || 'disponible' }])
-  .select()
-  .single();
+   .from('habitaciones')
+   .insert([{ numero, tipo, precio, estado: estado || 'disponible' }])
+   .select()
+   .single();
 
   if (error) return res.status(500).json({ message: error.message });
   res.status(201).json({ message: 'Habitación creada', id: data.id });
@@ -195,9 +200,9 @@ app.put('/habitaciones/:id', verificarToken, async (req, res) => {
   const { numero, tipo, precio, estado } = req.body;
 
   const { error } = await supabase
-  .from('habitaciones')
-  .update({ numero, tipo, precio, estado })
-  .eq('id', id);
+   .from('habitaciones')
+   .update({ numero, tipo, precio, estado })
+   .eq('id', id);
 
   if (error) return res.status(500).json({ message: error.message });
   res.json({ message: 'Habitación actualizada' });
@@ -205,9 +210,9 @@ app.put('/habitaciones/:id', verificarToken, async (req, res) => {
 
 app.delete('/habitaciones/:id', verificarToken, async (req, res) => {
   const { error } = await supabase
-  .from('habitaciones')
-  .delete()
-  .eq('id', req.params.id);
+   .from('habitaciones')
+   .delete()
+   .eq('id', req.params.id);
 
   if (error) return res.status(500).json({ message: error.message });
   res.json({ message: 'Habitación eliminada' });
@@ -216,18 +221,18 @@ app.delete('/habitaciones/:id', verificarToken, async (req, res) => {
 // ===== RESERVAS CRUD =====
 app.get('/reservas', verificarToken, async (req, res) => {
   const { data, error } = await supabase
-  .from('reservas')
-  .select(`
+   .from('reservas')
+   .select(`
       *,
       clientes (nombre),
       habitaciones (numero)
     `)
-  .order('id', { ascending: false });
+   .order('id', { ascending: false });
 
   if (error) return res.status(500).json({ message: error.message });
 
   const reservas = data.map(r => ({
-  ...r,
+   ...r,
     cliente_nombre: r.clientes?.nombre,
     habitacion_numero: r.habitaciones?.numero
   }));
@@ -248,8 +253,8 @@ app.post('/reservas', verificarToken, async (req, res) => {
   }
 
   const { data, error } = await supabase
-  .from('reservas')
-  .insert([{
+   .from('reservas')
+   .insert([{
       user_id,
       cliente_id,
       habitacion_id,
@@ -258,8 +263,8 @@ app.post('/reservas', verificarToken, async (req, res) => {
       total,
       estado: estado || 'activa'
     }])
-  .select()
-  .single();
+   .select()
+   .single();
 
   if (error) {
     console.log('Error al crear reserva:', error);
@@ -267,9 +272,9 @@ app.post('/reservas', verificarToken, async (req, res) => {
   }
 
   await supabase
-  .from('habitaciones')
-  .update({ estado: 'ocupada' })
-  .eq('id', habitacion_id);
+   .from('habitaciones')
+   .update({ estado: 'ocupada' })
+   .eq('id', habitacion_id);
 
   res.status(201).json({ message: 'Reserva creada', id: data.id });
 });
@@ -279,9 +284,9 @@ app.put('/reservas/:id', verificarToken, async (req, res) => {
   const { cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado } = req.body;
 
   const { error } = await supabase
-  .from('reservas')
-  .update({ cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado })
-  .eq('id', id);
+   .from('reservas')
+   .update({ cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado })
+   .eq('id', id);
 
   if (error) return res.status(500).json({ message: error.message });
   res.json({ message: 'Reserva actualizada' });
@@ -289,23 +294,23 @@ app.put('/reservas/:id', verificarToken, async (req, res) => {
 
 app.delete('/reservas/:id', verificarToken, async (req, res) => {
   const { data: reserva } = await supabase
-  .from('reservas')
-  .select('habitacion_id')
-  .eq('id', req.params.id)
-  .single();
+   .from('reservas')
+   .select('habitacion_id')
+   .eq('id', req.params.id)
+   .single();
 
   const { error } = await supabase
-  .from('reservas')
-  .delete()
-  .eq('id', req.params.id);
+   .from('reservas')
+   .delete()
+   .eq('id', req.params.id);
 
   if (error) return res.status(500).json({ message: error.message });
 
   if (reserva?.habitacion_id) {
     await supabase
-    .from('habitaciones')
-    .update({ estado: 'disponible' })
-    .eq('id', reserva.habitacion_id);
+     .from('habitaciones')
+     .update({ estado: 'disponible' })
+     .eq('id', reserva.habitacion_id);
   }
 
   res.json({ message: 'Reserva eliminada' });
