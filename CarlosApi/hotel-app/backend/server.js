@@ -1,283 +1,318 @@
+require('dotenv').config(); // <-- IMPORTANTE: de primeras
 const express = require('express');
 const cors = require('cors');
-const mysql = require('mysql2');
+const { createClient } = require('@supabase/supabase-js');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// Render necesita esto para los proxies
 app.set('trust proxy', 1);
-
 app.use(cors());
 app.use(express.json());
 
-const db = mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASS,
-    database: process.env.DB_NAME,
-    port: process.env.DB_PORT || 3306,
-    ssl: {
-        rejectUnauthorized: false
-    }
-});
+// ===== SUPABASE CLIENT =====
+// Borra el require('./db') y quédate solo con este
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-db.connect((err) => {
-    if (err) {
-        console.log('Error DB:', err);
-    } else {
-        console.log('Conectado a MySQL');
-    }
-});
-
-// ===== RUTA RAIZ PARA HEALTH CHECK DE RENDER =====
-// Esta ruta DEBE responder rápido o Render te tumba
+// ===== RUTA RAIZ PARA HEALTH CHECK =====
 app.get('/', (req, res) => {
-    res.status(200).json({
-        status: 'ok',
-        message: 'API Hotel funcionando',
-        timestamp: new Date().toISOString()
-    });
+  res.status(200).json({
+    status: 'ok',
+    message: 'API Hotel funcionando',
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ===== MIDDLEWARE PARA VERIFICAR TOKEN =====
 function verificarToken(req, res, next) {
-    const authHeader = req.headers['authorization'];
-    const token = authHeader && authHeader.split(' ')[1];
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
 
-    if (!token) return res.status(401).json({ message: 'Token requerido' });
+  if (!token) return res.status(401).json({ message: 'Token requerido' });
 
-    jwt.verify(token, process.env.JWT_SECRET || 'secretkey', (err, user) => {
-        if (err) return res.status(403).json({ message: 'Token inválido' });
-        req.user = user;
-        next();
-    });
+  jwt.verify(token, process.env.JWT_SECRET || 'secretkey', (err, user) => {
+    if (err) return res.status(403).json({ message: 'Token inválido' });
+    req.user = user;
+    next();
+  });
 }
 
 // ===== AUTH =====
 // REGISTER
-app.post('/register', (req, res) => {
-    const { nombre, email, password } = req.body;
+app.post('/register', async (req, res) => {
+  const { nombre, email, password } = req.body;
 
-    if (!nombre ||!email ||!password) {
-        return res.status(400).json({ message: 'Todos los campos son obligatorios' });
-    }
+  if (!nombre ||!email ||!password) {
+    return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+  }
 
-    const sqlCheck = 'SELECT * FROM usuarios WHERE email =?';
+  const { data: existing } = await supabase
+  .from('usuarios')
+  .select('id')
+  .eq('email', email)
+  .maybeSingle(); // maybeSingle para que no tire error si no existe
 
-    db.query(sqlCheck, [email], async (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        if (result.length > 0) {
-            return res.status(400).json({ message: 'Usuario ya existe' });
-        }
+  if (existing) {
+    return res.status(400).json({ message: 'Usuario ya existe' });
+  }
 
-        const hash = await bcrypt.hash(password, 10);
-        const sql = `INSERT INTO usuarios(nombre,email,password) VALUES (?,?,?)`;
+  const hash = await bcrypt.hash(password, 10);
+  const { error } = await supabase
+  .from('usuarios')
+  .insert([{ nombre, email, password: hash }]);
 
-        db.query(sql, [nombre, email, hash], (err) => {
-            if (err) return res.status(500).json({ message: err.sqlMessage });
-            res.status(201).json({ message: 'Usuario creado' });
-        });
-    });
+  if (error) return res.status(500).json({ message: error.message });
+  res.status(201).json({ message: 'Usuario creado' });
 });
 
 // LOGIN
-app.post('/login', (req, res) => {
-    const { email, password } = req.body;
+app.post('/login', async (req, res) => {
+  const { email, password } = req.body;
 
-    if (!email ||!password) {
-        return res.status(400).json({ message: 'Email y password requeridos' });
-    }
+  if (!email ||!password) {
+    return res.status(400).json({ message: 'Email y password requeridos' });
+  }
 
-    const sql = 'SELECT * FROM usuarios WHERE email =?';
+  const { data: user, error } = await supabase
+  .from('usuarios')
+  .select('*')
+  .eq('email', email)
+  .single();
 
-    db.query(sql, [email], async (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        if (result.length === 0) {
-            return res.status(401).json({ message: 'No existe usuario' });
-        }
+  if (error ||!user) {
+    return res.status(401).json({ message: 'No existe usuario' });
+  }
 
-        const user = result[0];
-        const ok = await bcrypt.compare(password, user.password);
-        if (!ok) {
-            return res.status(401).json({ message: 'Password incorrecta' });
-        }
+  const ok = await bcrypt.compare(password, user.password);
+  if (!ok) {
+    return res.status(401).json({ message: 'Password incorrecta' });
+  }
 
-        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secretkey', { expiresIn: '7d' });
-        res.json({ token, user: { id: user.id, nombre: user.nombre, email: user.email } });
-    });
+  const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secretkey', { expiresIn: '7d' });
+  res.json({ token, user: { id: user.id, nombre: user.nombre, email: user.email } });
 });
 
 // ===== DASHBOARD =====
-app.get('/dashboard', verificarToken, (req, res) => {
-    const sql = `
-        SELECT
-            (SELECT COUNT(*) FROM clientes) as clientes,
-            (SELECT COUNT(*) FROM habitaciones) as habitaciones,
-            (SELECT COUNT(*) FROM reservas WHERE estado = 'activa') as reservas,
-            (SELECT COUNT(*) FROM habitaciones WHERE estado = 'disponible') as disponibles
-    `;
+app.get('/dashboard', verificarToken, async (req, res) => {
+  const { count: clientesCount } = await supabase.from('clientes').select('*', { count: 'exact', head: true });
+  const { count: habitacionesCount } = await supabase.from('habitaciones').select('*', { count: 'exact', head: true });
+  const { count: reservasCount } = await supabase.from('reservas').select('*', { count: 'exact', head: true }).eq('estado', 'activa');
+  const { count: disponiblesCount } = await supabase.from('habitaciones').select('*', { count: 'exact', head: true }).eq('estado', 'disponible');
 
-    db.query(sql, (err, result) => {
-        if (err) {
-            console.log('Error dashboard:', err);
-            return res.status(500).json({ message: err.sqlMessage });
-        }
-        res.json(result[0]);
-    });
+  res.json({
+    clientes: clientesCount || 0,
+    habitaciones: habitacionesCount || 0,
+    reservas: reservasCount || 0,
+    disponibles: disponiblesCount || 0
+  });
 });
 
 // ===== CLIENTES CRUD =====
-app.get('/clientes', verificarToken, (req, res) => {
-    db.query('SELECT * FROM clientes ORDER BY id DESC', (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json(result);
-    });
+app.get('/clientes', verificarToken, async (req, res) => {
+  const { data, error } = await supabase
+  .from('clientes')
+  .select('*')
+  .order('id', { ascending: false });
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
 });
 
-app.post('/clientes', verificarToken, (req, res) => {
-    const { nombre, email, telefono } = req.body;
+app.post('/clientes', verificarToken, async (req, res) => {
+  const { nombre, email, telefono } = req.body;
 
-    if (!nombre ||!email) {
-        return res.status(400).json({ message: 'Nombre y email son obligatorios' });
-    }
+  if (!nombre ||!email) {
+    return res.status(400).json({ message: 'Nombre y email son obligatorios' });
+  }
 
-    const sql = 'INSERT INTO clientes (nombre, email, telefono) VALUES (?,?,?)';
-    db.query(sql, [nombre, email, telefono], (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.status(201).json({ message: 'Cliente creado', id: result.insertId });
-    });
+  const { data, error } = await supabase
+  .from('clientes')
+  .insert([{ nombre, email, telefono }])
+  .select()
+  .single();
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.status(201).json({ message: 'Cliente creado', id: data.id });
 });
 
-app.put('/clientes/:id', verificarToken, (req, res) => {
-    const { id } = req.params;
-    const { nombre, email, telefono } = req.body;
-    const sql = 'UPDATE clientes SET nombre=?, email=?, telefono=? WHERE id=?';
-    db.query(sql, [nombre, email, telefono, id], (err) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json({ message: 'Cliente actualizado' });
-    });
+app.put('/clientes/:id', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const { nombre, email, telefono } = req.body;
+
+  const { error } = await supabase
+  .from('clientes')
+  .update({ nombre, email, telefono })
+  .eq('id', id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Cliente actualizado' });
 });
 
-app.delete('/clientes/:id', verificarToken, (req, res) => {
-    db.query('DELETE FROM clientes WHERE id=?', [req.params.id], (err) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json({ message: 'Cliente eliminado' });
-    });
+app.delete('/clientes/:id', verificarToken, async (req, res) => {
+  const { error } = await supabase
+  .from('clientes')
+  .delete()
+  .eq('id', req.params.id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Cliente eliminado' });
 });
 
 // ===== HABITACIONES CRUD =====
-app.get('/habitaciones', verificarToken, (req, res) => {
-    db.query('SELECT * FROM habitaciones ORDER BY numero', (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json(result);
-    });
+app.get('/habitaciones', verificarToken, async (req, res) => {
+  const { data, error } = await supabase
+  .from('habitaciones')
+  .select('*')
+  .order('numero', { ascending: true });
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json(data);
 });
 
-app.post('/habitaciones', verificarToken, (req, res) => {
-    const { numero, tipo, precio, estado } = req.body;
+app.post('/habitaciones', verificarToken, async (req, res) => {
+  const { numero, tipo, precio, estado } = req.body;
 
-    if (!numero ||!tipo ||!precio) {
-        return res.status(400).json({ message: 'Numero, tipo y precio son obligatorios' });
-    }
+  if (!numero ||!tipo ||!precio) {
+    return res.status(400).json({ message: 'Numero, tipo y precio son obligatorios' });
+  }
 
-    const sql = 'INSERT INTO habitaciones (numero, tipo, precio, estado) VALUES (?,?,?,?)';
-    db.query(sql, [numero, tipo, precio, estado || 'disponible'], (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.status(201).json({ message: 'Habitación creada', id: result.insertId });
-    });
+  const { data, error } = await supabase
+  .from('habitaciones')
+  .insert([{ numero, tipo, precio, estado: estado || 'disponible' }])
+  .select()
+  .single();
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.status(201).json({ message: 'Habitación creada', id: data.id });
 });
 
-app.put('/habitaciones/:id', verificarToken, (req, res) => {
-    const { id } = req.params;
-    const { numero, tipo, precio, estado } = req.body;
-    const sql = 'UPDATE habitaciones SET numero=?, tipo=?, precio=?, estado=? WHERE id=?';
-    db.query(sql, [numero, tipo, precio, estado, id], (err) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json({ message: 'Habitación actualizada' });
-    });
+app.put('/habitaciones/:id', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const { numero, tipo, precio, estado } = req.body;
+
+  const { error } = await supabase
+  .from('habitaciones')
+  .update({ numero, tipo, precio, estado })
+  .eq('id', id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Habitación actualizada' });
 });
 
-app.delete('/habitaciones/:id', verificarToken, (req, res) => {
-    db.query('DELETE FROM habitaciones WHERE id=?', [req.params.id], (err) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json({ message: 'Habitación eliminada' });
-    });
+app.delete('/habitaciones/:id', verificarToken, async (req, res) => {
+  const { error } = await supabase
+  .from('habitaciones')
+  .delete()
+  .eq('id', req.params.id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Habitación eliminada' });
 });
 
 // ===== RESERVAS CRUD =====
-app.get('/reservas', verificarToken, (req, res) => {
-    const sql = `
-        SELECT r.*, c.nombre as cliente_nombre, h.numero as habitacion_numero
-        FROM reservas r
-        LEFT JOIN clientes c ON r.cliente_id = c.id
-        LEFT JOIN habitaciones h ON r.habitacion_id = h.id
-        ORDER BY r.id DESC
-    `;
-    db.query(sql, (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json(result);
-    });
+app.get('/reservas', verificarToken, async (req, res) => {
+  const { data, error } = await supabase
+  .from('reservas')
+  .select(`
+      *,
+      clientes (nombre),
+      habitaciones (numero)
+    `)
+  .order('id', { ascending: false });
+
+  if (error) return res.status(500).json({ message: error.message });
+
+  const reservas = data.map(r => ({
+  ...r,
+    cliente_nombre: r.clientes?.nombre,
+    habitacion_numero: r.habitaciones?.numero
+  }));
+
+  res.json(reservas);
 });
 
-app.post('/reservas', verificarToken, (req, res) => {
-    const { cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado } = req.body;
-    const user_id = req.user.id;
+app.post('/reservas', verificarToken, async (req, res) => {
+  const { cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado } = req.body;
+  const user_id = req.user.id;
 
-    if (!cliente_id ||!habitacion_id ||!fecha_entrada ||!fecha_salida ||!total) {
-        return res.status(400).json({ message: 'Faltan datos obligatorios' });
-    }
+  if (!cliente_id ||!habitacion_id ||!fecha_entrada ||!fecha_salida ||!total) {
+    return res.status(400).json({ message: 'Faltan datos obligatorios' });
+  }
 
-    if (new Date(fecha_salida) <= new Date(fecha_entrada)) {
-        return res.status(400).json({ message: 'La fecha de salida debe ser mayor a la de entrada' });
-    }
+  if (new Date(fecha_salida) <= new Date(fecha_entrada)) {
+    return res.status(400).json({ message: 'La fecha de salida debe ser mayor a la de entrada' });
+  }
 
-    const sql = `INSERT INTO reservas (user_id, cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado)
-                 VALUES (?,?,?,?,?,?,?)`;
+  const { data, error } = await supabase
+  .from('reservas')
+  .insert([{
+      user_id,
+      cliente_id,
+      habitacion_id,
+      fecha_entrada,
+      fecha_salida,
+      total,
+      estado: estado || 'activa'
+    }])
+  .select()
+  .single();
 
-    db.query(sql, [user_id, cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado || 'activa'], (err, result) => {
-        if (err) {
-            console.log('Error al crear reserva:', err);
-            return res.status(400).json({ message: err.sqlMessage || 'Error al crear reserva' });
-        }
+  if (error) {
+    console.log('Error al crear reserva:', error);
+    return res.status(400).json({ message: error.message || 'Error al crear reserva' });
+  }
 
-        db.query('UPDATE habitaciones SET estado = "ocupada" WHERE id =?', [habitacion_id]);
-        res.status(201).json({ message: 'Reserva creada', id: result.insertId });
-    });
+  await supabase
+  .from('habitaciones')
+  .update({ estado: 'ocupada' })
+  .eq('id', habitacion_id);
+
+  res.status(201).json({ message: 'Reserva creada', id: data.id });
 });
 
-app.put('/reservas/:id', verificarToken, (req, res) => {
-    const { id } = req.params;
-    const { cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado } = req.body;
-    const sql = `UPDATE reservas SET cliente_id=?, habitacion_id=?, fecha_entrada=?,
-                 fecha_salida=?, total=?, estado=? WHERE id=?`;
-    db.query(sql, [cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado, id], (err) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
-        res.json({ message: 'Reserva actualizada' });
-    });
+app.put('/reservas/:id', verificarToken, async (req, res) => {
+  const { id } = req.params;
+  const { cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado } = req.body;
+
+  const { error } = await supabase
+  .from('reservas')
+  .update({ cliente_id, habitacion_id, fecha_entrada, fecha_salida, total, estado })
+  .eq('id', id);
+
+  if (error) return res.status(500).json({ message: error.message });
+  res.json({ message: 'Reserva actualizada' });
 });
 
-app.delete('/reservas/:id', verificarToken, (req, res) => {
-    db.query('SELECT habitacion_id FROM reservas WHERE id=?', [req.params.id], (err, result) => {
-        if (err) return res.status(500).json({ message: err.sqlMessage });
+app.delete('/reservas/:id', verificarToken, async (req, res) => {
+  const { data: reserva } = await supabase
+  .from('reservas')
+  .select('habitacion_id')
+  .eq('id', req.params.id)
+  .single();
 
-        const habitacion_id = result[0]?.habitacion_id;
+  const { error } = await supabase
+  .from('reservas')
+  .delete()
+  .eq('id', req.params.id);
 
-        db.query('DELETE FROM reservas WHERE id=?', [req.params.id], (err) => {
-            if (err) return res.status(500).json({ message: err.sqlMessage });
+  if (error) return res.status(500).json({ message: error.message });
 
-            if (habitacion_id) {
-                db.query('UPDATE habitaciones SET estado = "disponible" WHERE id =?', [habitacion_id]);
-            }
+  if (reserva?.habitacion_id) {
+    await supabase
+    .from('habitaciones')
+    .update({ estado: 'disponible' })
+    .eq('id', reserva.habitacion_id);
+  }
 
-            res.json({ message: 'Reserva eliminada' });
-        });
-    });
+  res.json({ message: 'Reserva eliminada' });
 });
 
-// SERVER - ESTO ES LO CRÍTICO PARA RENDER
+// SERVER
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Servidor en puerto ${PORT}`);
+  console.log(`Servidor en puerto ${PORT}`);
 });
