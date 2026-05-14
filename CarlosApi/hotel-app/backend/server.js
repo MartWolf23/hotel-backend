@@ -9,12 +9,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// DB
+// DB - Usa variables de entorno
 const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: 'root',
-    database: 'dbhotel'
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASS,
+    database: process.env.DB_NAME,
+    port: process.env.DB_PORT || 3306
 });
 
 db.connect((err) => {
@@ -32,7 +33,7 @@ function verificarToken(req, res, next) {
 
     if (!token) return res.status(401).json({ message: 'Token requerido' });
 
-    jwt.verify(token, 'secretkey', (err, user) => {
+    jwt.verify(token, process.env.JWT_SECRET || 'secretkey', (err, user) => {
         if (err) return res.status(403).json({ message: 'Token inválido' });
         req.user = user;
         next();
@@ -40,7 +41,6 @@ function verificarToken(req, res, next) {
 }
 
 // ===== AUTH =====
-
 // REGISTER
 app.post('/register', (req, res) => {
     const { nombre, email, password } = req.body;
@@ -89,9 +89,14 @@ app.post('/login', (req, res) => {
             return res.status(401).json({ message: 'Password incorrecta' });
         }
 
-        const token = jwt.sign({ id: user.id }, 'secretkey', { expiresIn: '7d' });
+        const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || 'secretkey', { expiresIn: '7d' });
         res.json({ token, user: { id: user.id, nombre: user.nombre, email: user.email } });
     });
+});
+
+// ===== RUTA RAIZ PARA HEALTH CHECK =====
+app.get('/', (req, res) => {
+    res.json({ message: 'API Hotel funcionando' });
 });
 
 // ===== DASHBOARD =====
@@ -114,7 +119,6 @@ app.get('/dashboard', verificarToken, (req, res) => {
 });
 
 // ===== CLIENTES CRUD =====
-
 app.get('/clientes', verificarToken, (req, res) => {
     db.query('SELECT * FROM clientes ORDER BY id DESC', (err, result) => {
         if (err) return res.status(500).json({ message: err.sqlMessage });
@@ -154,7 +158,6 @@ app.delete('/clientes/:id', verificarToken, (req, res) => {
 });
 
 // ===== HABITACIONES CRUD =====
-
 app.get('/habitaciones', verificarToken, (req, res) => {
     db.query('SELECT * FROM habitaciones ORDER BY numero', (err, result) => {
         if (err) return res.status(500).json({ message: err.sqlMessage });
@@ -194,7 +197,6 @@ app.delete('/habitaciones/:id', verificarToken, (req, res) => {
 });
 
 // ===== RESERVAS CRUD =====
-
 app.get('/reservas', verificarToken, (req, res) => {
     const sql = `
         SELECT r.*, c.nombre as cliente_nombre, h.numero as habitacion_numero
@@ -217,7 +219,6 @@ app.post('/reservas', verificarToken, (req, res) => {
         return res.status(400).json({ message: 'Faltan datos obligatorios' });
     }
 
-    // Validar que fecha_salida > fecha_entrada
     if (new Date(fecha_salida) <= new Date(fecha_entrada)) {
         return res.status(400).json({ message: 'La fecha de salida debe ser mayor a la de entrada' });
     }
@@ -231,9 +232,7 @@ app.post('/reservas', verificarToken, (req, res) => {
             return res.status(400).json({ message: err.sqlMessage || 'Error al crear reserva' });
         }
 
-        // Actualizar estado de habitación a ocupada
         db.query('UPDATE habitaciones SET estado = "ocupada" WHERE id =?', [habitacion_id]);
-
         res.status(201).json({ message: 'Reserva creada', id: result.insertId });
     });
 });
@@ -250,7 +249,6 @@ app.put('/reservas/:id', verificarToken, (req, res) => {
 });
 
 app.delete('/reservas/:id', verificarToken, (req, res) => {
-    // Primero obtener la habitación para liberarla
     db.query('SELECT habitacion_id FROM reservas WHERE id=?', [req.params.id], (err, result) => {
         if (err) return res.status(500).json({ message: err.sqlMessage });
 
@@ -259,7 +257,6 @@ app.delete('/reservas/:id', verificarToken, (req, res) => {
         db.query('DELETE FROM reservas WHERE id=?', [req.params.id], (err) => {
             if (err) return res.status(500).json({ message: err.sqlMessage });
 
-            // Liberar habitación
             if (habitacion_id) {
                 db.query('UPDATE habitaciones SET estado = "disponible" WHERE id =?', [habitacion_id]);
             }
@@ -270,6 +267,7 @@ app.delete('/reservas/:id', verificarToken, (req, res) => {
 });
 
 // SERVER
-app.listen(3000, () => {
-    console.log('Servidor en http://localhost:3000');
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Servidor en puerto ${PORT}`);
 });
